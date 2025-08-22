@@ -154,7 +154,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             height=viewpoint_camera.image_height,
             near_plane=near,
             far_plane=far,
-            render_mode='RGB+D',
+            render_mode='RGB+ED',
             channel_chunk=32)
 
         feature_map, rendered_image, depth = torch.split(

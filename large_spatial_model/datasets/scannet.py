@@ -28,10 +28,11 @@ class Scannet(BaseStereoViewDataset):
         # Traverse all the folders in the data_root
         scene_names = [folder for folder in os.listdir(self.ROOT) if os.path.isdir(os.path.join(self.ROOT, folder))]
         scene_names.sort()
-        if self.split == 'train':
-            scene_names = scene_names[:-150]
-        else:
-            scene_names = scene_names[-150:]
+        if len(scene_names) > 50:  # for debug
+            if self.split == 'train':
+                scene_names = scene_names[:-150]
+            else:
+                scene_names = scene_names[-150:]
         # merge all pairs and images
         pairs = [] # (scene_name, image_idx1, image_idx2)
         images = {} # scene_name -> list of image_paths
@@ -41,7 +42,7 @@ class Scannet(BaseStereoViewDataset):
             frame_num = len(images_paths)
             scene_combinations = [(i, j)
                                 for i, j in itertools.combinations(range(frame_num), 2)
-                                if 0 < abs(i - j) <= 30 and abs(i - j) % 5 == 0]
+                                if 0 < abs(i - j) <= 4 and abs(i - j) % 2 == 0]
             pairs.extend([(scene_name, *pair) for pair in scene_combinations])
             images[scene_name] = images_paths
             

@@ -22,7 +22,7 @@ class Scannetpp(BaseStereoViewDataset):
         
     def _load_data(self):
         # Traverse all the folders in the data_root
-        scene_names = [folder for folder in os.listdir(self.ROOT) if os.path.isdir(os.path.join(self.ROOT, folder))]
+        scene_names = [folder for folder in os.listdir(self.ROOT) if os.path.isdir(os.path.join(self.ROOT, folder)) and folder != 'splits']
         scene_names.sort()
 
         # merge all pairs and images
@@ -37,7 +37,7 @@ class Scannetpp(BaseStereoViewDataset):
             frame_num = len(images_paths)
             scene_combinations = [(i, j)
                                 for i, j in itertools.combinations(range(frame_num), 2)
-                                if 0 < abs(i - j) <= 30 and abs(i - j) % 5 == 0]
+                                if 0 < abs(i - j) <= 4 and abs(i - j) % 2 == 0]
             pairs.extend([(scene_name, *pair) for pair in scene_combinations])
             images[scene_name] = images_paths
             

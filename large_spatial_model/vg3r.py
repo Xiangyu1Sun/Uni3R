@@ -14,6 +14,8 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
 from .utils.weight_modify import checkpoint_filter_fn
 
+from distiller.vggt.models.vggt import Distiller
+
 
 class VG3R(nn.Module):
 
@@ -21,9 +23,18 @@ class VG3R(nn.Module):
         super().__init__()
         self.config = LSMConfig(**config)
 
-        self.vggt = VGGT(patch_size=16)
         _url = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
         weights = torch.hub.load_state_dict_from_url(_url, map_location='cpu')
+
+        # loading VGGT ckpt as a distiller
+        self.distiller = Distiller()
+        self.distiller.load_state_dict(weights, strict=True)
+        print("Freezing distiller")
+        self.distiller.eval()
+        for param in self.distiller.parameters():
+            param.requires_grad = False
+
+        self.vggt = VGGT(patch_size=16)
         weights = weights.get('state_dict', weights)
         weights = checkpoint_filter_fn(weights, self.vggt)
         self.vggt.load_state_dict(weights, strict=False)
@@ -60,16 +71,33 @@ class VG3R(nn.Module):
             for param in self.lseg_feature_extractor.parameters():
                 param.requires_grad = False
 
-        # self.load_state_dict(torch.load('checkpoint-last.pth', map_location='cpu')['model'], strict=True)
+        # self.load_state_dict(torch.load('../checkpoint-last.pth', map_location='cpu')['model'], strict=False)
 
     def forward(self, view1, view2):
+
+        # predict depth from distiller here
+        images = torch.stack((view1['img'], view2['img']), 1)
+        B, V, _, H, W = images.shape
+        images = images.view(-1, 3, H, W)
+        images_up = F.interpolate(images, size=(518, 518), mode='bilinear', align_corners=False)
+        images_up = images_up.view(B, V, 3, 518, 518)
+        with torch.no_grad():
+            distiller_outputs = self.distiller((images_up + 1) / 2)
+
+        # normalize intrinsics, assuming the images width and height are same here
+        view1_intr = torch.concat((view1['camera_intrinsics'][:, :2,:] / view1['img'].shape[2],
+            view1['camera_intrinsics'][:, 2:, :]), dim=1)
+        view2_intr = torch.concat((view2['camera_intrinsics'][:, :2,:] / view2['img'].shape[2],
+            view2['camera_intrinsics'][:, 2:, :]), dim=1)
+        images_intr = torch.stack((view1_intr, view2_intr), 1)
+
         images = torch.stack((view1['img'], view2['img']), 1)
         dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
         if self.config.freeze_dust3r:
             with torch.no_grad():
-                outputs = self.vggt((images + 1) / 2)
+                outputs = self.vggt((images + 1) / 2, images_intr)
         else:
-            outputs = self.vggt((images + 1) / 2)
+            outputs = self.vggt((images + 1) / 2, images_intr)
         extr, intr = pose_encoding_to_extri_intri(outputs['pose_enc'], view1['img'].shape[2:])
         extr = F.pad(extr, (0, 0, 0, 1), value=0)
         extr[..., 3, 3] = 1
@@ -87,6 +115,11 @@ class VG3R(nn.Module):
             final_output[i]['depth'] = outputs['depth'][:, i]
             final_output[i]['extr'] = extr[:, i]
             final_output[i]['intr'] = intr[:, i]
+            # for depth map supervision
+            final_output[i]['distiller_depth'] = distiller_outputs['depth'][:, i]
+            final_output[i]['distiller_depth_conf'] = distiller_outputs['depth_conf'][:, i]
+            final_output[i]['distiller_world_points'] = distiller_outputs['world_points'][:, i]
+            final_output[i]['distiller_world_points_conf'] = distiller_outputs['world_points_conf'][:, i]
         return final_output
 
     def extract_lseg_features(self, view1, view2):
